@@ -26,6 +26,7 @@ Residual：以Convolution为基础，且结构类似Resnet中的Identity Block�
 
 </br>
 </br>
+
 ## Loss
 由三部分构成：中心坐标和宽高损失，置信度损失，分类损失。三部分损失由&lambda;平衡。
 
@@ -34,6 +35,7 @@ Residual：以Convolution为基础，且结构类似Resnet中的Identity Block�
 由于论文中并没有给出具体的损失函数，所以不同的博客，代码对损失函数的解析可能并不相同，但是基本结构都是一样的。
 
 </br>
+
 ### 中心坐标和宽高损失
 
 <img src="https://i.loli.net/2020/05/17/ODfGSVgbiZlPIap.png" height=130>
@@ -50,6 +52,7 @@ xy_loss = obj_mask * box_loss_scale * \
 问题：框的大小与中心坐标损失应该是无关的，为什么中心坐标前面也要加上权重？
 
 </br>
+
 ### 置信度损失
 
 <img src="https://i.loli.net/2020/05/17/zV7nCfXkEQbargx.png" height=130>
@@ -59,6 +62,7 @@ xy_loss = obj_mask * box_loss_scale * \
 在本次研究的代码中，上述权重(即式中的&lambda;<sub>noobj</sub>)设置为1。对于有物体的位置，计算交叉熵，对于没有物体且IOU低于ignore_thres的位置，计算交叉熵，对两者求和。而忽略掉了那些没有物体且IOU大于0.5的预测框置信度损失，可能是因为nms会去掉这些框，所以不纳入损失计算。
 
 </br>
+
 ### 分类损失
 
 <img src="https://i.loli.net/2020/05/17/HNjDCRwtBS1qkld.png" height=70>
@@ -67,6 +71,7 @@ xy_loss = obj_mask * box_loss_scale * \
 
 </br>
 </br>
+
 ## 一些细节
 ### 初始anchors的生成
 对于YOLO网络输出的三个特征层，在它们上面分别定义不同大小的anchors,下图是YOLOv3作者通过在VOC数据集上进行聚类得到的anchors。因此对于自己的数据集，可以进行相同的聚类算法得到一组新的anchors，或许可以改善效果。
@@ -74,5 +79,6 @@ xy_loss = obj_mask * box_loss_scale * \
 <img src="https://i.loli.net/2020/05/17/ON872bCtx35AusX.png" height=90>
 
 </br>
+
 ### 图片预处理
 本次研究的代码中，使用了resize直接将图片变成416\*416的正方形，引起了图片失真。这里可以修改为等比缩放后进行零填充，应该可以改善效果。
