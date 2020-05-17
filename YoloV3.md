@@ -32,7 +32,7 @@ Residual：以Convolution为基础，且结构类似Resnet中的Identity Block�
 
 <img src="https://i.loli.net/2020/05/17/NJcr9VI6pCMynxt.png" height=300>
 
-由于论文中并没有给出具体的损失函数，所以不同的博客，代码对损失函数的解析可能并不相同，但是基本结构都是一样的。
+由于论文中并没有给出具体的损失函数，所以不同博客，不同代码对损失函数的解释可能并不相同，但是基本结构都是一样的。
 
 </br>
 
