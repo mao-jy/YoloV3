@@ -1,10 +1,15 @@
+
+
+
+
 # YoloV3 Implemented in TensorFlow 2.0
 
 This directory contains a clean implementation of YoloV3 in TensorFlow 2.0.
 
 
 
-# Requirements
+## Requirements
+
 tensorflow==2.1.0rc1
 
 opencv-python==4.1.1.26
@@ -13,7 +18,7 @@ tqdm
 
 
 
-# Training
+## Training
 
 ```
 train.py:
@@ -51,7 +56,7 @@ train.py:
 
 
 
-# Inference
+## Inference
 
 ```
 detect.py:
@@ -67,5 +72,21 @@ detect.py:
     (default: './checkpoints/yolov3.tf')
   --num_classes: number of classes in the model
     (default: '80')
-    (an integer)
+    (an integer)    
+```
+
+
+
+## Pretrained Weights
+
+### Download and Convert pre-trained Darknet weights
+
+```
+# yolov3
+wget https://pjreddie.com/media/files/yolov3.weights -O data/yolov3.weights
+python convert.py --weights ./data/yolov3.weights --output ./checkpoints/yolov3.tf
+
+# yolov3-tiny
+wget https://pjreddie.com/media/files/yolov3-tiny.weights -O data/yolov3-tiny.weights
+python convert.py --weights ./data/yolov3-tiny.weights --output ./checkpoints/yolov3-tiny.tf --tiny
 ```
