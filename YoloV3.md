@@ -11,12 +11,14 @@ Residual：以Convolution为基础，且结构类似Resnet中的Identity Block�
 <img src="https://i.loli.net/2020/05/17/K2CYwrPAfUpmhi1.png" height="140">
 
 </br>
+
 ### Darknet-53
 在上面两种基本单元的基础上，搭建Darknet-53。
 
 <img src="https://i.loli.net/2020/05/17/OMkufShXAs9gPZe.png" height=600>
 
 </br>
+
 ### YOLO
 使用Darknet-53的前52个卷积层进行特征提取，再做类似于FPN的操作提取多层特征。不同之处在于：FPN将高层特征做上采样后与低层特征相加，而YOLO中是将高层特征上采样后与低层特征做concat操作。
 
