@@ -4,7 +4,7 @@
 
 # YoloV3 Implemented in TensorFlow 2.0
 
-This directory contains a clean implementation of YoloV3 in TensorFlow 2.0.
+This directory contains a clean implementation of YoloV3 in TensorFlow 2.0
 
 
 
@@ -90,3 +90,9 @@ python convert.py --weights ./data/yolov3.weights --output ./checkpoints/yolov3.
 wget https://pjreddie.com/media/files/yolov3-tiny.weights -O data/yolov3-tiny.weights
 python convert.py --weights ./data/yolov3-tiny.weights --output ./checkpoints/yolov3-tiny.tf --tiny
 ```
+
+
+
+# Acknowledgement
+
+This work builds heavily based on [yolov3-tf2](https://github.com/zzh8829/yolov3-tf2)
