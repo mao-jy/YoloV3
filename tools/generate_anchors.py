@@ -106,10 +106,10 @@ class YOLO_Kmeans:
         """
         f = open(self.filename, 'r')
         dataSet = []
-        for line in f:
+        for line in f:                  # 每一行对应一张图片
             infos = line.split(" ")
             length = len(infos)
-            for i in range(1, length):
+            for i in range(1, length):  # 每行中多个bbox以空格分开，每个bbox的四个坐标值(xmin, ymin, xmax, ymax)以逗号分开
                 width = int(infos[i].split(",")[2]) - \
                     int(infos[i].split(",")[0])
                 height = int(infos[i].split(",")[3]) - \
