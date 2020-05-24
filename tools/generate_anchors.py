@@ -1,140 +1,181 @@
+# 踩坑后的经验：
+# 使用kmeans聚类获取anchors之前需要将初始的图片进行和算法中相同的预处理
+# 常见的图片预处理方法是：pad到正方形+resize到416*416，所以对于初始的图片，也需要进行pad+resize，再进行框聚类
+# 由于代码中是对归一化后的宽高做kmeans，代码中的宽高[width, height]是框的实际宽高[w, h]占图片宽高[img_width, img_height]的比例
+# 即[width, height] = [w, h] / [img_width, img_height]，所以仅需考虑pad这一步对[width, height]带来的影响
+
 import os
+import cv2
 import numpy as np
+from tqdm import tqdm
 
 
-class YOLO_Kmeans:
+def iou(box, clusters):
+    """计算单个box和所有clusters的iou
 
-    def __init__(self, cluster_number, filename, target_filename):
-        self.cluster_number = cluster_number
-        self.filename = filename
-        self.target_filename = target_filename
+    Args:
+        box: [width, height]
+        clusters: [num_bboxs, [width, height]]
 
-    def iou(self, boxes, clusters):
-        """计算联合iou
+    Returns:
+        [num_bboxs,,]. 单个bbox和所有clusters的iou
+    """
+    x = np.minimum(clusters[:, 0], box[0])
+    y = np.minimum(clusters[:, 1], box[1])
+    if np.count_nonzero(x == 0) > 0 or np.count_nonzero(y == 0) > 0:
+        raise ValueError("Box has no area")
 
-        Args:
-            boxes: [num_bboxes, [width, height]]
-            clusters: [num_anchors, [width, height]]
+    intersection = x * y
+    box_area = box[0] * box[1]
+    cluster_area = clusters[:, 0] * clusters[:, 1]
 
-        Returns:
-            result: [num_bboxes, num_anchors]. result[i][j]表示第i个bbox和第j个anchor的iou
-        """
-        n = boxes.shape[0]
-        k = self.cluster_number
+    iou_ = intersection / (box_area + cluster_area - intersection)
 
-        box_area = boxes[:, 0] * boxes[:, 1]        # [num_bboxes]
-        box_area = box_area.repeat(k)               # [num_bboxes * num_anchors]. 注意和np.tile区别
-        box_area = np.reshape(box_area, (n, k))     # [num_bboxes, num_anchors]. 第i行是将第i个bboxes的面积重复num_anchors次
+    return iou_
 
-        cluster_area = clusters[:, 0] * clusters[:, 1]      # [num_anchors]
-        cluster_area = np.tile(cluster_area, [1, n])        # [num_anchors * num_bboxes]. 注意和repeat区别
-        cluster_area = np.reshape(cluster_area, (n, k))     # [num_bboxes, num_anchors]. 第i行是num_anchors个anchors的面积
 
-        box_w_matrix = np.reshape(boxes[:, 0].repeat(k), (n, k))
-        cluster_w_matrix = np.reshape(np.tile(clusters[:, 0], (1, n)), (n, k))
-        min_w_matrix = np.minimum(cluster_w_matrix, box_w_matrix)
+def avg_iou(boxes, clusters):
+    """计算平均iou
 
-        box_h_matrix = np.reshape(boxes[:, 1].repeat(k), (n, k))
-        cluster_h_matrix = np.reshape(np.tile(clusters[:, 1], (1, n)), (n, k))
-        min_h_matrix = np.minimum(cluster_h_matrix, box_h_matrix)
+    Args:
+        boxes: [num_bboxes, [width, height]]
+        clusters: [num_clusters, [wisth, height]]
 
-        # [num_bboxes, num_anchors]. inter_area[i][j]的值是第i个bbox和第j个anchor的相交面积
-        inter_area = np.multiply(min_w_matrix, min_h_matrix)
+    Returns:
+        float.
+    """
+    return np.mean([np.max(iou(boxes[i], clusters)) for i in range(boxes.shape[0])])
 
-        result = inter_area / (box_area + cluster_area - inter_area)
 
-        return result
+def translate_boxes(boxes):
+    """
+    Translates all the boxes to the origin.
+    :param boxes: numpy array of shape (r, 4)
+    :return: numpy array of shape (r, 2)
+    """
+    new_boxes = boxes.copy()
+    for row in range(new_boxes.shape[0]):
+        new_boxes[row][2] = np.abs(new_boxes[row][2] - new_boxes[row][0])
+        new_boxes[row][3] = np.abs(new_boxes[row][3] - new_boxes[row][1])
+    return np.delete(new_boxes, [0, 1], axis=1)
 
-    def avg_iou(self, boxes, clusters):
-        accuracy = np.mean([np.max(self.iou(boxes, clusters), axis=1)])
-        return accuracy
 
-    def kmeans(self, boxes, k, dist=np.median):
-        """
+def kmeans(boxes, k, dist=np.median):
+    """kmeans生成聚类中心
 
-        Args:
-            boxes: [num_bboxes, [width, height]]
-            k: 最终需要的anchors的个数
-            dist: np.median返回中位数
+    Args:
+        boxes: [num_bboxes, [width, height]]
+        k: 聚类的个数
+        dist: 更新聚类中心的方法
 
-        Returns:
-            [num_anchors, [width, height]]
-        """
-        box_number = boxes.shape[0]
-        distances = np.empty((box_number, k))
-        last_nearest = np.zeros((box_number,))
-        np.random.seed()
-        clusters = boxes[np.random.choice(      # clusters: [9, [width, height]].
-            box_number, k, replace=False)]      # 从boxes中随机不重复取num_anchors个bbox作为初始anchors
-        while True:
-            # [num_bboxes, num_anchors]. distance[i][j]表示第i个bbox和第j个anchor的距离
-            distances = 1 - self.iou(boxes, clusters)
+    Returns:
+        [num_clusters, [width, height]]
+    """
+    rows = boxes.shape[0]
 
-            # [num_bboxes]. 与某个bboxes距离距离最近的anchor下标注
-            current_nearest = np.argmin(distances, axis=1)
+    distances = np.empty((rows, k))         # [num_bboxes, num_clusters]
+    last_clusters = np.zeros((rows,))       # [num_bboxes,]
 
-            if (last_nearest == current_nearest).all():
-                break
+    np.random.seed()                        # 随机数种子
 
-            # 用多个bboxes的中位数更新anchors
-            for cluster in range(k):
-                clusters[cluster] = dist(boxes[current_nearest == cluster], axis=0)
+    # [num_bboxes, num_clusters]. 从bboxes中随机不重复取num_bboxes个[width, height]
+    clusters = boxes[np.random.choice(rows, k, replace=False)]
 
-            last_nearest = current_nearest
+    while True:
 
-        return clusters
+        # distances: [num_bboxes, num_clusters]. 所有anchors和所有bboxes的distance
+        for row in range(rows):
+            distances[row] = 1 - iou(boxes[row], clusters)
 
-    def result2txt(self, data):
-        """
-        将聚类得到的anchors写入txt文件中
-        """
-        f = open(os.path.join(os.path.dirname(__file__), self.target_filename), 'w')
-        row = np.shape(data)[0]
-        for i in range(row):
-            if i == 0:
-                x_y = "%d,%d" % (data[i][0], data[i][1])
-            else:
-                x_y = ", %d,%d" % (data[i][0], data[i][1])
-            f.write(x_y)
-        f.close()
+        # [num_bboxes,]. 和每个bboxes距离最近的是哪个cluster
+        nearest_clusters = np.argmin(distances, axis=1)
 
-    def txt2boxes(self):
-        """将txt文件中的所有bbox的宽高提取出来
+        if (last_clusters == nearest_clusters).all():
+            break
 
-        Returns:
-            result: [num_bboxes, [width, height]]
-        """
-        f = open(self.filename, 'r')
-        dataSet = []
-        for line in f:                  # 每一行对应一张图片
-            infos = line.split(" ")
-            length = len(infos)
-            for i in range(1, length):  # 每行中多个bbox以空格分开，每个bbox的四个坐标值(xmin, ymin, xmax, ymax)以逗号分开
-                width = int(infos[i].split(",")[2]) - \
-                    int(infos[i].split(",")[0])
-                height = int(infos[i].split(",")[3]) - \
-                    int(infos[i].split(",")[1])
-                dataSet.append([width, height])
-        result = np.array(dataSet)
-        f.close()
-        return result
+        # 取得所有和当前cluster距离最近的bboxes的中位数作为新的聚类中心
+        for cluster in range(k):
+            clusters[cluster] = dist(boxes[nearest_clusters == cluster], axis=0)
 
-    def txt2clusters(self):
-        """
-        对filename中的框进行聚类，得到k个anchors，并将结果写入新的target_filename中
-        """
-        all_boxes = self.txt2boxes()                            # [num_bboxes, [width, height]]
-        result = self.kmeans(all_boxes, k=self.cluster_number)  # [num_anchors, [width, height]]
-        result = result[np.lexsort(result.T[0, None])]          # 将result按宽度进行升序排列
-        self.result2txt(result)
+        last_clusters = nearest_clusters
 
-        print("K anchors:\n {}".format(result))
-        print("Accuracy: {:.2f}%".format(self.avg_iou(all_boxes, result) * 100))
+    return clusters
+
+
+def get_wh(txt_path, anno_dir, img_dir):
+    """获取所有框归一化形式的w, h
+
+    Args:
+        txt_path: 训练集文件名
+        anno_dir: txt标注文件所在目录
+        img_dir: 图片目录
+
+    Returns:
+        [num_bboxes, [width, height]]. width, height的值介于0, 1之间
+    """
+
+    with open(txt_path, 'r') as f:
+        all_filenames = f.read().splitlines()
+
+    bboxes = []
+
+    for filename in tqdm(all_filenames):
+
+        filename = filename.split(r'/')[-1].replace('.jpg', '.txt')
+        txt_anno_path = os.path.join(anno_dir, filename)
+        img_path = os.path.join(img_dir, filename.replace('.txt', '.jpg'))
+
+        with open(txt_anno_path, 'r') as f:
+
+            lines = f.read().splitlines()
+
+            for line in lines:
+                line = line.split(' ')
+                width, height = float(line[3]), float(line[4])
+
+                # 算法中的数据预处理时会先将图片pad成正方形，然后resize到416*416，框的聚类前也要进行一样的处理
+                # 这一步相当于计算框在pad后的图片上的宽、高
+                img = cv2.imread(img_path)
+                img_height, img_width = img.shape[0], img.shape[1]
+                if img_height > img_width:
+                    width = width * img_width / img_height
+                elif img_height < img_width:
+                    height = height * img_height / img_width
+
+                bboxes.append([width, height])
+
+    return np.array(bboxes)
+
+
+def main():
+    txt_path = r'C:\Users\J_M\Desktop\anchors_get\train.txt'  # 训练集文件名
+    anno_dir = r'C:\Users\J_M\Desktop\anchors_get\trainval\labels'  # txt标注目录
+    img_dir = r'C:\Users\J_M\Desktop\anchors_get\trainval\images'  # 图片目录
+    num_clusters = 9
+
+    # 从标注文件中加载所有框的w和h，w和h的值需要是归一化后的形式
+    print('loading bboxes whdth and height...')
+    bboxes_wh = get_wh(txt_path, anno_dir, img_dir)
+    print('bboxes width and height loaded\n')
+
+    # kmeans生成聚类中心
+    print('generating clusters...')
+    clusters = kmeans(bboxes_wh, num_clusters)
+    print('cluster:\n', clusters, '\n')
+
+    # 聚类框
+    anchors = np.round(clusters * 416)
+    print('anchors:\n', anchors, '\n')
+
+    # 计算平均iou
+    print("Average IoU: {:.2f}%".format(avg_iou(bboxes_wh, clusters) * 100))
+    yolov3clusters = [[10, 13], [16, 30], [33, 23], [30, 61], [62, 45], [59, 119], [116, 90], [156, 198], [373, 326]]
+    yolov3clusters = np.array(yolov3clusters) / 416.0
+    print("Average IoU with VOC clusters: {:.2f}%\n".format(avg_iou(bboxes_wh, yolov3clusters) * 100))
+
+    ratios = np.around(clusters[:, 0] / clusters[:, 1], decimals=2).tolist()
+    print("Ratios:\n {}".format(sorted(ratios)))
 
 
 if __name__ == "__main__":
-    cluster_number = 9
-    filename = "2007_train.txt"
-    target_filename = "model_data/train_anchors.txt"
-    kmeans = YOLO_Kmeans(cluster_number, filename, target_filename)
-    kmeans.txt2clusters()
+    main()
